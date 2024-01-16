@@ -1,0 +1,8 @@
+version: "3"
+services:
+  vndb:
+    build: ./
+    privileged: false
+    restart: always
+    ports:
+      - 5432:5432
