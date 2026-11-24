@@ -1,0 +1,24 @@
+name: Publish SQLite catalog
+on: workflow_dispatch
+permissions:
+  contents: write
+concurrency: sqlite-publication
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Convert upstream dump
+        run: |
+          curl -fL --retry 3 https://dl.vndb.org/dump/vndb-db-latest.tar.zst -o archive.tar.zst
+          python3 sqlite/build.py --catalog-only archive.tar.zst vndb.sqlite
+      - name: Publish compressed database and checksum
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gzip -n vndb.sqlite
+          sha256sum vndb.sqlite.gz > vndb.sqlite.gz.sha256
+          if ! gh release view sqlite >/dev/null 2>&1; then
+            gh release create sqlite --title "SQLite catalog" --notes "Current public catalog from https://vndb.org/d14."
+          fi
+          gh release upload sqlite vndb.sqlite.gz vndb.sqlite.gz.sha256 --clobber
