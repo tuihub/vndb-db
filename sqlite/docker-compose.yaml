@@ -1,0 +1,9 @@
+name: vndb-sqlite
+services:
+  sqlite:
+    build: ./
+    environment:
+      - ASSET_DOWNLOAD_URL
+    volumes:
+      - ./data:/data
+    command: [/data/vndb.sqlite]

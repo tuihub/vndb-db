@@ -3,22 +3,12 @@ SHELL ["/bin/bash", "-c"]
 
 ARG ARCHIVE_PATH="/vndb-db-latest.tar.zst"
 ARG LATEST_ASSET_URL="https://dl.vndb.org/dump/vndb-db-latest.tar.zst"
-ARG TEMP_DIR="/tmp/archive"
-
-RUN echo "Downloading Archive"
+ARG ASSET_DOWNLOAD_URL
 
 RUN apk add --no-cache tar zstd curl
 
-# Download the Archive file
-RUN if [ -n "$ASSET_DOWNLOAD_URL" ]; then \
-      curl -fL --retry 5 --retry-delay 5 -o "$ARCHIVE_PATH" "$ASSET_DOWNLOAD_URL"; \
-    else \
-      curl -fL --retry 5 --retry-delay 5 -o "$ARCHIVE_PATH" "$LATEST_ASSET_URL"; \
-    fi;
-
+RUN curl -fL --retry 5 --retry-delay 5 -o "$ARCHIVE_PATH" -- "${ASSET_DOWNLOAD_URL:-$LATEST_ASSET_URL}"
 RUN apk del curl
-
-RUN echo "Building Image"
 
 COPY initdb.sh /docker-entrypoint-initdb.d/
 RUN sed -i 's/\r$//' /docker-entrypoint-initdb.d/initdb.sh

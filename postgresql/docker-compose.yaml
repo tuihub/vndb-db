@@ -1,7 +1,10 @@
-version: "3"
+name: vndb-db
 services:
   vndb:
-    build: ./
+    build:
+      context: ./
+      args:
+        - ASSET_DOWNLOAD_URL
     privileged: false
     restart: always
     ports:
