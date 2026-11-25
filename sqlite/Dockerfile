@@ -5,5 +5,6 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 COPY build.py initdb.sh /app/
+RUN sed -i 's/\r$//' /app/initdb.sh
 
 ENTRYPOINT ["sh", "/app/initdb.sh"]
