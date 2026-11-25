@@ -1,5 +1,8 @@
 name: Publish SQLite catalog
-on: workflow_dispatch
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "30 23 * * 0" # Runs every Monday at 07:30 China Standard Time.
 permissions:
   contents: write
 concurrency: sqlite-publication
@@ -8,17 +11,21 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Convert upstream dump
-        run: |
-          curl -fL --retry 3 https://dl.vndb.org/dump/vndb-db-latest.tar.zst -o archive.tar.zst
-          python3 sqlite/build.py --catalog-only archive.tar.zst vndb.sqlite
-      - name: Publish compressed database and checksum
+      - name: Build SQLite catalog
+        run: VNDB_SOURCE_NAME_FILE="$RUNNER_TEMP/vndb-source-name" sh sqlite/initdb.sh vndb.sqlite --catalog-only
+      - name: Publish ZIP archive and checksum
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gzip -n vndb.sqlite
-          sha256sum vndb.sqlite.gz > vndb.sqlite.gz.sha256
+          source_name=$(cat "$RUNNER_TEMP/vndb-source-name")
+          case "$source_name" in
+            vndb-db-[0-9]*.tar.zst) ;;
+            *) echo "Expected a dated VNDB dump filename. Received $source_name." >&2; exit 1 ;;
+          esac
+          archive_name="${source_name%.tar.zst}.zip"
+          zip -q -6 "./$archive_name" vndb.sqlite
+          sha256sum -- "$archive_name" > "$archive_name.sha256"
           if ! gh release view sqlite >/dev/null 2>&1; then
-            gh release create sqlite --title "SQLite catalog" --notes "Current public catalog from https://vndb.org/d14."
+            gh release create sqlite --title "SQLite catalog" --notes "Prebuilt SQLite catalogs from [VNDB database dumps](https://vndb.org/d14)."
           fi
-          gh release upload sqlite vndb.sqlite.gz vndb.sqlite.gz.sha256 --clobber
+          gh release upload sqlite "./$archive_name" "./$archive_name.sha256" --clobber

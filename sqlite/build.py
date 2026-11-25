@@ -1,13 +1,23 @@
-"""Convert a VNDB .tar.zst dump to a standalone SQLite database."""
+"""Build a standalone SQLite database from a VNDB .tar.zst dump."""
 import argparse
 import os
 import re
-import sqlite3
+import shutil
 import subprocess
 import tarfile
 import tempfile
 from contextlib import closing
 from pathlib import Path
+
+try:
+    import sqlite3
+except ImportError as error:
+    raise SystemExit(f"The sqlite3 module is unavailable ({error}).") from None
+
+CREATE_GAME_TITLES_TABLE = (
+    "CREATE VIRTUAL TABLE game_titles "
+    "USING fts5(id UNINDEXED, title, tokenize='trigram')"
+)
 
 ESCAPES = {b"b": b"\b", b"f": b"\f", b"n": b"\n", b"r": b"\r", b"t": b"\t", b"v": b"\v"}
 ESCAPE = re.compile(rb"\\([0-7]{1,3}|x[0-9a-fA-F]{1,2}|.)")
@@ -18,6 +28,19 @@ CATALOG = {
     "vn_staff", "staff", "staff_alias", "releases", "releases_vn", "releases_titles",
     "releases_producers", "releases_extlinks", "releases_platforms", "producers", "extlinks", "images",
 }
+
+
+def check_environment():
+    if shutil.which("zstd") is None:
+        raise SystemExit("Install zstd and make it available on PATH to read VNDB dumps.")
+    try:
+        with closing(sqlite3.connect(":memory:")) as db:
+            db.execute(CREATE_GAME_TITLES_TABLE)
+    except sqlite3.Error as error:
+        raise SystemExit(
+            f"SQLite {sqlite3.sqlite_version} cannot create an FTS5 trigram index ({error}). "
+            "Use Python with SQLite 3.34 or later and FTS5 enabled."
+        ) from None
 
 
 def unescape(match):
@@ -102,6 +125,7 @@ def load(db, source, catalog_only):
 
 
 def convert(archive, output, catalog_only=False):
+    check_environment()
     with tempfile.TemporaryDirectory(dir=output.parent) as temp:
         stage = Path(temp) / "vndb.sqlite"
         with closing(sqlite3.connect(stage)) as db, db:
@@ -110,7 +134,7 @@ def convert(archive, output, catalog_only=False):
                 with decoder.stdout, tarfile.open(fileobj=decoder.stdout, mode="r|") as source:
                     load(db, source, catalog_only)
                     db.execute("CREATE INDEX releases_vn_vid ON releases_vn(vid)")
-                    db.execute("CREATE VIRTUAL TABLE game_titles USING fts5(id UNINDEXED, title, tokenize='trigram')")
+                    db.execute(CREATE_GAME_TITLES_TABLE)
                     db.execute("INSERT INTO game_titles SELECT id,title FROM vn_titles UNION ALL SELECT id,latin FROM vn_titles WHERE latin IS NOT NULL")
                 if decoder.wait():
                     raise ValueError("Invalid zstd archive")
@@ -119,8 +143,15 @@ def convert(archive, output, catalog_only=False):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("archive", type=Path)
-    parser.add_argument("output", type=Path)
-    parser.add_argument("--catalog-only", action="store_true", help="build only the public catalog tables used for game metadata")
+    parser.add_argument("--check", action="store_true", help="check for zstd and FTS5 trigram support and exit")
+    parser.add_argument("--catalog-only", action="store_true", help="include only the public catalog tables")
+    parser.add_argument("archive", type=Path, nargs="?")
+    parser.add_argument("output", type=Path, nargs="?")
     args = parser.parse_args()
-    convert(args.archive, args.output, args.catalog_only)
+    if args.check:
+        check_environment()
+        print(f"zstd is available. SQLite {sqlite3.sqlite_version} supports FTS5 trigram indexes.")
+    elif args.archive is None or args.output is None:
+        parser.error("archive and output are required")
+    else:
+        convert(args.archive, args.output, args.catalog_only)
